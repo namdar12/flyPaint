@@ -1,0 +1,11 @@
+# Connectome data and derived caches (download with `flypaint prepare`)
+data/
+runs/
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/

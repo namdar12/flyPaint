@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flypaint"
+version = "0.1.0"
+description = "A simulated male fruit fly brain (MaleCNS v1.0 connectome) listens to music and paints its reaction."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.0",
+    "pyarrow>=14",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    "Pillow>=10",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+flypaint = "flypaint.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flypaint*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
