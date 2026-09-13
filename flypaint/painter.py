@@ -24,7 +24,7 @@ class Painter:
     turn_rate_rad: float = 0.35
     min_radius_px: float = 3.0
     max_radius_px: float = 28.0
-    opacity: float = 0.35
+    opacity: float = 0.4
     seed: int = 0
     canvas: np.ndarray = field(init=False)
     x: float = field(init=False)
@@ -48,7 +48,7 @@ class Painter:
             return
         yy, xx = np.mgrid[y0:y1, x0:x1]
         d2 = (xx - cx) ** 2 + (yy - cy) ** 2
-        a = alpha * np.exp(-d2 / (2 * (radius * 0.55) ** 2)).astype(np.float32)
+        a = alpha * np.exp(-d2 / (2 * (radius * 0.45) ** 2)).astype(np.float32)
         patch = self.canvas[y0:y1, x0:x1]
         patch *= (1 - a)[..., None]
         patch += a[..., None] * rgb
