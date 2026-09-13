@@ -122,3 +122,79 @@ def extract_features(y: np.ndarray, sr: int, hop_ms: float = 10.0, high_center_h
 def features_from_file(path: str, hop_ms: float = 10.0, **kw) -> AudioFeatures:
     y, sr = load_audio(path)
     return extract_features(y, sr, hop_ms, **kw)
+
+
+class StreamingFeatures:
+    """Same four features as `extract_features`, computed one hop at a time from a live
+    PCM stream at any sample rate.
+
+    The file version normalises each feature against the whole track's 97th percentile.
+    Live audio has no future, so each feature is scaled by a running reference that
+    tracks recent peaks and decays with `norm_tau_s`, floored at a fraction of the
+    loudest thing heard so far (so silence does not get amplified into noise).
+
+    Feed `push(samples)` with float32 arrays shaped [channels, n]; it yields one
+    feature dict per completed hop: a_high, a_low, wind, onset (each length-2, L/R).
+    """
+
+    def __init__(self, sr: int, hop_ms: float = 20.0, high_center_hz: float = 400.0, low_center_hz: float = 90.0,
+                 norm_tau_s: float = 8.0, floor_frac: float = 0.06, channels: int = 2):
+        self.sr, self.hop_ms, self.channels = int(sr), float(hop_ms), int(channels)
+        self.hop = max(1, int(round(sr * hop_ms / 1000.0)))
+        self.n_fft = 2048 if sr <= 24000 else 4096
+        freqs = np.fft.rfftfreq(self.n_fft, 1.0 / sr)
+        self.w_high = _band_weights(freqs, high_center_hz, 1.2).astype(np.float32)
+        self.w_low = _band_weights(freqs, low_center_hz, 0.8).astype(np.float32)
+        self.w_low[freqs > max(250.0, 2.5 * low_center_hz)] = 0.0
+        self.window = np.hanning(self.n_fft).astype(np.float32)
+        # ~48 log-spaced triangular bands (60 Hz .. sr/2) for a noise-robust onset flux
+        edges = np.geomspace(60.0, sr / 2, 50)
+        fb = np.zeros((48, freqs.size), dtype=np.float32)
+        for b in range(48):
+            lo, mid, hi = edges[b], edges[b + 1], edges[b + 2]
+            fb[b] = np.clip(np.minimum((freqs - lo) / max(mid - lo, 1e-6), (hi - freqs) / max(hi - mid, 1e-6)), 0, 1)
+        self.fb = fb
+        self.buf = np.zeros((self.channels, self.n_fft), dtype=np.float32)
+        self.pending = np.zeros((self.channels, 0), dtype=np.float32)
+        self.env = np.zeros(self.channels, dtype=np.float32)
+        self.env_alpha = float(np.exp(-hop_ms / 250.0))
+        self.prev_logS = None
+        self.decay = float(np.exp(-hop_ms / 1000.0 / norm_tau_s))
+        self.floor_frac = floor_frac
+        self.ref = {k: np.full(self.channels, 1e-6, dtype=np.float32) for k in ("bands", "wind", "onset")}
+        self.peak = {k: np.full(self.channels, 1e-6, dtype=np.float32) for k in self.ref}
+        self.frames = 0
+
+    def _norm(self, key: str, x: np.ndarray, ref_key: str | None = None) -> np.ndarray:
+        """Scale x by a running reference. `ref_key` lets several features share one
+        reference: the two auditory bands share theirs, so a track with no bass gives a
+        small a_low instead of amplifying leakage to full scale."""
+        k = ref_key or key
+        self.peak[k] = np.maximum(self.peak[k], x)
+        self.ref[k] = np.maximum(np.maximum(self.ref[k] * self.decay, x), self.floor_frac * self.peak[k])
+        return np.clip(x / np.maximum(self.ref[k], 1e-9), 0.0, 1.0).astype(np.float32)
+
+    def push(self, samples: np.ndarray) -> list[dict]:
+        samples = np.asarray(samples, dtype=np.float32)
+        if samples.ndim == 1:
+            samples = samples[None, :]
+        if samples.shape[0] == 1 and self.channels == 2:
+            samples = np.vstack([samples, samples])
+        self.pending = np.concatenate([self.pending, samples[: self.channels]], axis=1)
+        out = []
+        while self.pending.shape[1] >= self.hop:
+            chunk, self.pending = self.pending[:, : self.hop], self.pending[:, self.hop:]
+            self.buf = np.concatenate([self.buf[:, self.hop:], chunk], axis=1) if self.hop < self.n_fft else chunk[:, -self.n_fft:]
+            S = np.abs(np.fft.rfft(self.buf * self.window, axis=1)) ** 2            # [C, F]
+            ph = np.sqrt(S @ self.w_high); pl = np.sqrt(S @ self.w_low)
+            rms = np.sqrt(S.mean(1) + 1e-12)
+            self.env = self.env_alpha * self.env + (1 - self.env_alpha) * rms
+            bands = S @ self.fb.T                                                    # [C, 48]
+            db = 10.0 * np.log10(np.maximum(bands, bands.max(1, keepdims=True) * 1e-8 + 1e-12))
+            db = np.maximum(db, db.max(1, keepdims=True) - 80.0)
+            flux = np.zeros(self.channels, dtype=np.float32) if self.prev_logS is None else np.maximum(db - self.prev_logS, 0.0).mean(1)
+            self.prev_logS = db
+            self.frames += 1
+            out.append(dict(a_high=self._norm("a_high", ph, "bands"), a_low=self._norm("a_low", pl, "bands"),
+                            wind=self._norm("wind", self.env.copy()), onset=self._norm("onset", flux)))
+        return out

@@ -98,6 +98,28 @@ docker compose run --rm flypaint paint /app/runs/song.mp3 -o /app/runs/song
 The API is plain JSON under `/api/` (`/api/settings` for the schema, `/api/jobs` to
 submit and list, `/api/jobs/<id>/painting.png` and friends for files).
 
+### Listen live (Spotify, YouTube, anything in a tab)
+
+Streaming services never expose their audio, so instead the fly listens to what your
+browser is playing. Press **Listen live**, pick the tab that is playing (Spotify's web
+player at open.spotify.com works) and tick *Share tab audio*. The page streams the raw
+sound to the container over a WebSocket, and the brain paints as it arrives, with the
+canvas, lag and neuron rates updating live. **Stop & save** writes the run to the
+gallery like any other painting, with the captured audio alongside it.
+
+Details worth knowing:
+
+* Chrome and Edge can share a tab's audio; Safari and Firefox cannot. On Windows,
+  sharing the entire screen with system audio captures the desktop Spotify app too.
+* Live mode defaults to 1 ms of brain time per 20 ms of audio, about five times
+  less brain time than a file run, so that a 4-core laptop keeps up in real time.
+  If the brain still falls more than 1.5 s behind, audio frames are skipped and the
+  count is shown; untick *Real-time brain speed* to use the Run settings instead.
+* Features are normalised against a running level rather than the whole track, so the
+  first few seconds of a session are calibrating.
+* `scripts/live_client.py` streams a file to the endpoint at real-time pace, for
+  testing the live path without a browser.
+
 ## Install without Docker
 
 ```bash

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>flypaint</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2712%27 fill=%27%23f08a4b%27/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #101214; --panel: #181b1f; --panel2: #1f2329; --line: #2a2f36; --text: #e8e6e1; --muted: #9aa0a8;
@@ -75,6 +76,17 @@
   .empty { color: var(--muted); padding: 30px; text-align: center; }
   .err { color: var(--bad); }
   .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 8px; }
+  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .live-box { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel2); }
+  .live-box p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+  .live-box label { display: flex; gap: 8px; align-items: center; font-size: 12.5px; margin: 6px 0; }
+  .live-box input[type=text] { flex: 1; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 6px; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  .lag { font-variant-numeric: tabular-nums; }
+  .lag.bad { color: var(--bad); }
 </style>
 </head>
 <body>
@@ -91,6 +103,17 @@
       <div>Drop an audio file here or click to choose</div>
       <div class="name" id="fname">wav · flac · ogg · mp3</div>
     </label>
+    <div class="or">or</div>
+    <div class="live-box" id="livebox">
+      <p><strong>Listen live.</strong> Share a browser tab that is playing music (Spotify's web player, YouTube, anything). The fly hears whatever the tab plays and paints as it goes.</p>
+      <label>Title <input type="text" id="livetitle" placeholder="what's playing"></label>
+      <label><input type="checkbox" id="livert" checked> Real-time brain speed (1 ms brain per 20 ms audio; overrides the two Run settings)</label>
+      <div class="actions" style="margin-top:8px">
+        <button class="primary" id="livestart" disabled>Listen live</button>
+        <button class="danger" id="livestop" hidden>Stop &amp; save</button>
+      </div>
+      <div class="hint" id="livehint">Chrome or Edge: in the share dialog pick the <em>Chrome Tab</em> that is playing and tick <em>Share tab audio</em>. On Windows, <em>Entire screen</em> with system audio also works. Safari and Firefox cannot share tab audio.</div>
+    </div>
     <h2 style="margin-top:16px">2. Settings</h2>
     <div id="form"></div>
     <div class="actions">
@@ -101,6 +124,17 @@
   </section>
 
   <section class="stack">
+    <div class="card" id="livecard" hidden>
+      <div class="job-head">
+        <span class="title"><span class="dot"></span><span id="ltitle">live</span></span>
+        <span class="state running" id="lstage">connecting</span>
+        <span class="meta lag" id="llag"></span>
+      </div>
+      <div class="meta" id="lmsg" style="margin-top:8px"></div>
+      <div class="live" id="llive"></div>
+      <div id="lchan"></div>
+      <div class="art"><figure><img id="lpreview" alt="live painting"><figcaption>live canvas</figcaption></figure></div>
+    </div>
     <div class="card" id="jobcard">
       <div class="empty" id="jobempty">Upload a song and press Paint. The fly's progress and a live preview appear here.</div>
       <div id="jobview" hidden>
@@ -208,7 +242,7 @@ async function pollStatus() {
     const s = await fetch('/api/status').then(r => r.json());
     const pill = $('#status');
     if (s.loading) { pill.textContent = 'loading connectome…'; pill.className = 'pill'; }
-    else if (s.ready) { pill.textContent = `brain ready · ${s.neurons.toLocaleString()} neurons · ${s.edges.toLocaleString()} edges`; pill.className = 'pill ok'; ready = true; if (file) $('#paint').disabled = false; }
+    else if (s.ready) { pill.textContent = `brain ready · ${s.neurons.toLocaleString()} neurons · ${s.edges.toLocaleString()} edges`; pill.className = 'pill ok'; ready = true; if (file) $('#paint').disabled = false; liveButtons(); }
     else { pill.textContent = 'connectome not loaded: ' + s.error; pill.className = 'pill bad'; }
     if (s.loading) setTimeout(pollStatus, 1500);
   } catch (e) { $('#status').textContent = 'server unreachable'; setTimeout(pollStatus, 3000); }
@@ -282,6 +316,92 @@ function fmt(s) { s = Math.max(0, s | 0); return s >= 3600 ? `${(s / 3600).toFix
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function hsv(h, s, v) { h = ((h % 1) + 1) % 1; const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
   const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6]; return `rgb(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0})`; }
+
+// ---------- live listening (tab audio capture -> WebSocket -> brain) ----------
+let live = null;   // { ws, ctx, stream, node, src }
+const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+if (!canCapture) { $('#livehint').textContent = 'Live listening needs Chrome or Edge (tab audio capture is not available in this browser).'; }
+function liveButtons() { $('#livestart').disabled = !(ready && canCapture) || !!live; $('#livestop').hidden = !live; }
+$('#livestart').onclick = startLive;
+$('#livestop').onclick = () => stopLive(true);
+
+async function startLive() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch (e) { return; }
+  if (!stream.getAudioTracks().length) {
+    stream.getTracks().forEach(t => t.stop());
+    alert('No audio in that share. Pick the tab that is playing and tick "Share tab audio".');
+    return;
+  }
+  stream.getVideoTracks().forEach(t => t.stop());               // we only want the sound
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 2, 2);
+  const settings = getValues();
+  if ($('#livert').checked) { settings.brain_ms_per_frame = 1.0; settings.hop_ms = 20.0; }
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/live');
+  ws.binaryType = 'arraybuffer';
+  live = { ws, ctx, stream, node, src, jobId: null, t0: Date.now() };
+  liveButtons();
+  $('#livecard').hidden = false; $('#ltitle').textContent = $('#livetitle').value || 'live'; $('#lstage').textContent = 'connecting';
+  $('#lmsg').textContent = ''; $('#llive').innerHTML = ''; $('#lchan').innerHTML = ''; $('#lpreview').removeAttribute('src');
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'start', sr: ctx.sampleRate, channels: 2, settings, title: $('#livetitle').value || 'live' }));
+    node.onaudioprocess = e => {
+      if (ws.readyState !== 1) return;
+      const L = e.inputBuffer.getChannelData(0), R = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : L;
+      const out = new Int16Array(L.length * 2);
+      for (let i = 0; i < L.length; i++) { out[2 * i] = Math.max(-1, Math.min(1, L[i])) * 32767; out[2 * i + 1] = Math.max(-1, Math.min(1, R[i])) * 32767; }
+      ws.send(out.buffer);
+    };
+    src.connect(node); node.connect(ctx.destination);   // destination keeps the processor alive; the tab share is muted by Chrome anyway
+  };
+  ws.onmessage = ev => {
+    if (ev.data instanceof ArrayBuffer) {
+      const url = URL.createObjectURL(new Blob([ev.data], { type: 'image/jpeg' }));
+      const img = $('#lpreview'); const old = img.src; img.src = url; if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+      return;
+    }
+    const m = JSON.parse(ev.data);
+    if (m.type === 'started') { live.jobId = m.job.id; refreshGallery(); }
+    else if (m.type === 'status') renderLive(m.status);
+    else if (m.type === 'done') { finishLive(); if (m.job) select(m.job.id); }
+    else if (m.type === 'error') { alert('Live session: ' + m.message); finishLive(); if (m.job) select(m.job.id); }
+  };
+  ws.onclose = () => finishLive();
+  stream.getAudioTracks()[0].onended = () => stopLive(true);   // user clicked "Stop sharing" in the browser bar
+}
+function renderLive(st) {
+  $('#lstage').textContent = st.stage || '';
+  const lag = st.lag_s || 0; const el = $('#llag'); el.textContent = `lag ${lag.toFixed(2)} s` + (st.skipped ? ` · skipped ${st.skipped} frames` : ''); el.className = 'meta lag' + (lag > 1 ? ' bad' : '');
+  $('#lmsg').textContent = st.stage === 'listening' ? `${(st.audio_s || 0).toFixed(1)} s heard · ${st.frames || 0} frames · ${st.dabs || 0} dabs` : (st.error || '');
+  const box = $('#llive'); box.innerHTML = '';
+  if (st.rates) {
+    const c = st.cmd || {};
+    stat(box, 'spikes / frame', st.spikes); stat(box, 'descending Hz', st.rates.dn.toFixed(2)); stat(box, 'giant fibre Hz', st.rates.gf.toFixed(1));
+    stat(box, 'speed', c.speed.toFixed(2)); stat(box, 'turn', c.turn.toFixed(2)); stat(box, 'width', c.width.toFixed(2));
+    const sw = document.createElement('div'); sw.className = 'stat'; sw.innerHTML = `<div class="k">ink</div><div class="swatch" style="background:${hsv(c.hue, c.sat, c.value)}"></div>`; box.appendChild(sw);
+  }
+  const ch = $('#lchan'); ch.innerHTML = '';
+  if (st.channels) for (const [k, v] of Object.entries(st.channels)) ch.insertAdjacentHTML('beforeend', `<div class="chan"><span class="k">${k}</span><div class="b"><div style="width:${Math.min(100, 100 * v).toFixed(0)}%"></div></div><span class="k" style="width:36px;text-align:right">${v.toFixed(2)}</span></div>`);
+}
+function stopLive(sendStop) {
+  if (!live) return;
+  const l = live;
+  try { l.node.onaudioprocess = null; l.src.disconnect(); l.node.disconnect(); } catch (e) {}
+  l.stream.getTracks().forEach(t => t.stop());
+  l.ctx.close().catch(() => {});
+  if (sendStop && l.ws.readyState === 1) { l.ws.send(JSON.stringify({ type: 'stop' })); $('#lstage').textContent = 'saving'; $('#livestop').disabled = true; }
+  else finishLive();
+}
+function finishLive() {
+  if (!live) return;
+  const l = live; live = null;
+  try { l.node.onaudioprocess = null; l.stream.getTracks().forEach(t => t.stop()); l.ctx.close().catch(() => {}); } catch (e) {}
+  $('#livestop').disabled = false; $('#livecard').hidden = true; liveButtons(); refreshGallery();
+}
 
 loadSchema(); pollStatus(); refreshGallery();
 setInterval(() => { if (jobsCache.some(j => j.state === 'running' || j.state === 'queued')) refreshGallery(); }, 5000);

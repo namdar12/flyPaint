@@ -16,7 +16,9 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import asyncio
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .. import data as D
@@ -73,6 +75,16 @@ class JobStore:
         self.q.put(jid)
         return job
 
+    def create_live(self, title: str, settings: PaintSettings) -> dict:
+        jid = time.strftime("%Y%m%d-%H%M%S") + "-live-" + uuid.uuid4().hex[:6]
+        self.dir(jid).mkdir(parents=True)
+        job = dict(id=jid, state="running", audio="live.wav", title=title or "live", settings=settings.to_dict(), live_capture=True,
+                   created=time.time(), updated=time.time(), progress=0.0, message="listening", live={})
+        with self.lock:
+            self.jobs[jid] = job
+            self.save(jid)
+        return job
+
     def public(self, jid: str) -> dict:
         j = dict(self.jobs[jid])
         d = self.dir(jid)
@@ -89,7 +101,7 @@ class JobStore:
 def create_app(min_synapses: int = 5, runs_dir: str | Path = "runs/web") -> FastAPI:
     app = FastAPI(title="flypaint")
     store = JobStore(Path(runs_dir))
-    state: dict = {"graph": None, "graph_error": None, "loading": True}
+    state: dict = {"graph": None, "graph_error": None, "loading": True, "live": None}
 
     def loader():
         try:
@@ -155,6 +167,7 @@ def create_app(min_synapses: int = 5, runs_dir: str | Path = "runs/web") -> Fast
                     neurons=g.n if g else None, edges=g.n_edges if g else None,
                     min_synapses=g.min_synapses if g else min_synapses,
                     running=[k for k, v in store.jobs.items() if v["state"] == "running"],
+                    live=(state["live"].snapshot() if state["live"] is not None else None),
                     queued=[k for k, v in store.jobs.items() if v["state"] == "queued"])
 
     @app.get("/api/settings")
@@ -221,6 +234,87 @@ def create_app(min_synapses: int = 5, runs_dir: str | Path = "runs/web") -> Fast
         if jid not in store.jobs:
             raise HTTPException(404)
         return FileResponse(store.dir(jid) / store.jobs[jid]["audio"])
+
+    # ---- live listening -----------------------------------------------------------
+    @app.websocket("/ws/live")
+    async def ws_live(ws: WebSocket):
+        """Protocol: first text message {type:"start", sr, channels, settings, title}; then binary
+        int16 PCM chunks; {type:"stop"} ends. Server sends {type:"status", status} every 250 ms,
+        binary JPEG previews every ~600 ms, and finally {type:"done", job} or {type:"error"}."""
+        from ..live import LiveSession
+        await ws.accept()
+        if state["graph"] is None:
+            await ws.send_json({"type": "error", "message": "connectome not loaded yet" if state["loading"] else f"connectome not loaded: {state['graph_error']}"})
+            await ws.close(); return
+        if state["live"] is not None and not state["live"].finished.is_set():
+            await ws.send_json({"type": "error", "message": "another live session is running; stop it first"})
+            await ws.close(); return
+        try:
+            first = await ws.receive_json()
+            if first.get("type") != "start":
+                raise ValueError("first message must be start")
+            settings = PaintSettings.from_dict(first.get("settings") or {})
+            sr = int(first.get("sr") or 48000); channels = int(first.get("channels") or 2)
+            if not (8000 <= sr <= 192000):
+                raise ValueError(f"unsupported sample rate {sr}")
+        except Exception as e:  # noqa: BLE001
+            await ws.send_json({"type": "error", "message": f"bad start message: {e}"})
+            await ws.close(); return
+        job = store.create_live(str(first.get("title") or "live"), settings)
+        jid = job["id"]
+        sess = LiveSession(state["graph"], settings, store.dir(jid), sr=sr, channels=channels)
+        state["live"] = sess
+        await ws.send_json({"type": "started", "job": store.public(jid)})
+
+        async def sender():
+            last_prev = None
+            while not sess.finished.is_set():
+                st = sess.snapshot()
+                await ws.send_json({"type": "status", "status": st, "job_id": jid})
+                store.update(jid, live=st, message=st.get("stage", ""))
+                p = sess.preview_png()
+                if p is not None and p is not last_prev:
+                    await ws.send_bytes(p); last_prev = p
+                    (store.dir(jid) / "preview.jpg").write_bytes(p)
+                await asyncio.sleep(0.25)
+
+        send_task = asyncio.create_task(sender())
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    sess.push_pcm16(msg["bytes"])
+                elif msg.get("text"):
+                    m = json.loads(msg["text"])
+                    if m.get("type") == "stop":
+                        break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sess.stop()
+        # wait for the worker to flush and write the job
+        while not sess.finished.is_set():
+            await asyncio.sleep(0.1)
+        send_task.cancel()
+        if sess.error:
+            store.update(jid, state="failed", message=sess.error, finished=time.time())
+            try:
+                await ws.send_json({"type": "error", "message": sess.error, "job": store.public(jid)})
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            store.update(jid, state="done", message="done", progress=1.0, meta=sess.meta, finished=time.time())
+            try:
+                await ws.send_json({"type": "done", "job": store.public(jid)})
+            except Exception:  # noqa: BLE001
+                pass
+        state["live"] = None
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     return app
 
