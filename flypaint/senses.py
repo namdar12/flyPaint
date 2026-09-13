@@ -72,7 +72,9 @@ EAR_MODES = ("mono_left", "stereo")
 
 
 def stimulus_for_frame(ear: Ear, a_high: np.ndarray, a_low: np.ndarray, wind: np.ndarray,
-                       onset: np.ndarray, gain: float = 1.0, ear_mode: str = "mono_left") -> tuple[np.ndarray, np.ndarray]:
+                       onset: np.ndarray, gain: float = 1.0, ear_mode: str = "mono_left",
+                       max_sound_hz: float = MAX_SOUND_HZ, max_wind_hz: float = MAX_WIND_HZ,
+                       max_touch_hz: float = MAX_TOUCH_HZ) -> tuple[np.ndarray, np.ndarray]:
     """Return (idx, rate_hz) arrays for one audio frame. Feature inputs are length-2 [L, R].
 
     ear_mode "stereo": left channel -> left antenna, right channel -> right antenna.
@@ -89,11 +91,11 @@ def stimulus_for_frame(ear: Ear, a_high: np.ndarray, a_low: np.ndarray, wind: np
     idx, rate = [], []
     for si, s in enumerate("LR"):
         for pop, val, mx in (
-            (ear.jo_a[s], a_high[si], MAX_SOUND_HZ),
-            (ear.jo_b[s], a_low[si], MAX_SOUND_HZ),
-            (ear.jo_other[s], 0.5 * (a_high[si] + a_low[si]), MAX_SOUND_HZ),
-            (ear.wind[s], wind[si], MAX_WIND_HZ),
-            (ear.touch[s], onset[si], MAX_TOUCH_HZ),
+            (ear.jo_a[s], a_high[si], max_sound_hz),
+            (ear.jo_b[s], a_low[si], max_sound_hz),
+            (ear.jo_other[s], 0.5 * (a_high[si] + a_low[si]), max_sound_hz),
+            (ear.wind[s], wind[si], max_wind_hz),
+            (ear.touch[s], onset[si], max_touch_hz),
         ):
             if pop.size:
                 idx.append(pop)

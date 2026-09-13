@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flypaint</title>
+<style>
+  :root {
+    --bg: #101214; --panel: #181b1f; --panel2: #1f2329; --line: #2a2f36; --text: #e8e6e1; --muted: #9aa0a8;
+    --accent: #f08a4b; --accent2: #b06cf0; --ok: #7bd389; --bad: #f06c6c; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 24px 8px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: .5px; }
+  header h1 span { color: var(--accent); }
+  header .sub { color: var(--muted); }
+  .pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--panel2); color: var(--muted); font-size: 12px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: #2f5a38; }
+  .pill.bad { color: var(--bad); border-color: #6a2f2f; }
+  main { display: grid; grid-template-columns: 420px 1fr; gap: 20px; padding: 8px 24px 40px; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .drop { border: 1.5px dashed #3a4048; border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); background: #1c1f24; }
+  .drop input { display: none; }
+  .drop .name { color: var(--text); font-weight: 600; margin-top: 4px; word-break: break-all; }
+  details.group { border-top: 1px solid var(--line); padding: 8px 0; }
+  details.group summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+  details.group summary::before { content: "▸"; color: var(--muted); font-size: 12px; }
+  details[open].group summary::before { content: "▾"; }
+  details.group summary small { color: var(--muted); font-weight: 400; }
+  .row { display: grid; grid-template-columns: 1fr 78px; gap: 8px; align-items: center; margin: 10px 0 2px; }
+  .row label { display: block; font-size: 13px; }
+  .row .help { color: var(--muted); font-size: 11.5px; line-height: 1.3; margin-top: 1px; }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 0; }
+  .row input[type=number], .row select, .row input[type=color] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit; }
+  .row input[type=color] { height: 30px; padding: 2px; }
+  .row .ctl { grid-column: 1 / span 1; }
+  .row.wide { grid-template-columns: 1fr; }
+  .actions { display: flex; gap: 10px; margin-top: 14px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a0f08; font-weight: 700; flex: 1; }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  button.danger { color: var(--bad); }
+  .stack { display: flex; flex-direction: column; gap: 20px; }
+  .job-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .job-head .title { font-weight: 700; font-size: 16px; }
+  .state { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
+  .state.running { color: var(--accent); } .state.done { color: var(--ok); } .state.failed, .state.cancelled { color: var(--bad); }
+  .bar { height: 8px; background: var(--panel2); border-radius: 999px; overflow: hidden; margin: 10px 0 6px; }
+  .bar div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .6s; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .live { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 12px 0; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 8px 10px; }
+  .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .stat .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .chan { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
+  .chan .k { width: 46px; color: var(--muted); }
+  .chan .b { flex: 1; height: 6px; background: var(--panel2); border-radius: 999px; overflow: hidden; }
+  .chan .b div { height: 100%; background: var(--accent2); }
+  .swatch { width: 100%; height: 18px; border-radius: 6px; border: 1px solid var(--line); margin-top: 6px; }
+  .art { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  @media (max-width: 700px) { .art { grid-template-columns: 1fr; } }
+  .art img { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+  .art figcaption { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .links a { color: var(--accent); margin-right: 12px; font-size: 13px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .thumb { cursor: pointer; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel2); }
+  .thumb.sel { border-color: var(--accent); }
+  .thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #f7f5ed; }
+  .thumb .cap { padding: 6px 8px; font-size: 12px; }
+  .thumb .cap div { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  .err { color: var(--bad); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>fly<span>paint</span></h1>
+  <div class="sub">a fruit fly brain listens to a song and paints</div>
+  <div class="pill" id="status">connecting…</div>
+</header>
+<main>
+  <section class="card" id="compose">
+    <h2>1. Song</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".wav,.flac,.ogg,.mp3,.aiff,.aif,.oga,.opus,audio/*">
+      <div>Drop an audio file here or click to choose</div>
+      <div class="name" id="fname">wav · flac · ogg · mp3</div>
+    </label>
+    <h2 style="margin-top:16px">2. Settings</h2>
+    <div id="form"></div>
+    <div class="actions">
+      <button class="primary" id="paint" disabled>Paint</button>
+      <button id="reset">Reset defaults</button>
+    </div>
+    <div class="hint">Painting takes roughly 2 to 3 seconds of wall time per second of audio at the default brain speed. Use “Max seconds” for a quick preview.</div>
+  </section>
+
+  <section class="stack">
+    <div class="card" id="jobcard">
+      <div class="empty" id="jobempty">Upload a song and press Paint. The fly's progress and a live preview appear here.</div>
+      <div id="jobview" hidden>
+        <div class="job-head">
+          <span class="title" id="jtitle"></span>
+          <span class="state" id="jstate"></span>
+          <span class="meta" id="jwhen"></span>
+          <span style="margin-left:auto"></span>
+          <button class="danger" id="cancel" hidden>Stop</button>
+          <button id="reuse">Use these settings</button>
+          <button class="danger" id="delete" hidden>Delete</button>
+        </div>
+        <div class="bar"><div id="jbar"></div></div>
+        <div class="meta" id="jmsg"></div>
+        <div class="live" id="jlive"></div>
+        <div id="jchan"></div>
+        <div class="art" id="jart"></div>
+        <div class="links" id="jlinks" style="margin-top:10px"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Gallery</h2>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let schema = [], groups = [], file = null, selected = null, pollTimer = null, jobsCache = [];
+
+// ---------- settings form ----------
+async function loadSchema() {
+  const r = await fetch('/api/settings').then(r => r.json());
+  schema = r.schema; groups = r.groups;
+  const form = $('#form'); form.innerHTML = '';
+  for (const g of groups) {
+    const d = document.createElement('details'); d.className = 'group'; d.open = g.key === 'run';
+    d.innerHTML = `<summary>${g.label} <small>${g.help}</small></summary>`;
+    for (const f of schema.filter(f => f.group === g.key)) d.appendChild(row(f));
+    form.appendChild(d);
+  }
+  const saved = localStorage.getItem('flypaint.settings');
+  if (saved) { try { setValues(JSON.parse(saved)); } catch (e) {} }
+}
+function row(f) {
+  const div = document.createElement('div'); div.className = 'row';
+  const lab = `<div><label for="s_${f.name}">${f.label}</label><div class="help">${f.help || ''}</div></div>`;
+  if (f.type === 'choice') {
+    div.classList.add('wide');
+    div.innerHTML = lab + `<select id="s_${f.name}" data-name="${f.name}">${f.choices.map(c => `<option ${c === f.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
+  } else if (f.type === 'color') {
+    div.innerHTML = lab + `<input type="color" id="s_${f.name}" data-name="${f.name}" value="${f.default}">`;
+  } else {
+    div.innerHTML = lab + `<input type="number" id="s_${f.name}" data-name="${f.name}" value="${f.default}" min="${f.lo}" max="${f.hi}" step="${f.step}">`
+      + `<input type="range" class="ctl" data-for="s_${f.name}" value="${f.default}" min="${f.lo}" max="${f.hi}" step="${f.step}">`;
+    const num = div.querySelector('input[type=number]'), rng = div.querySelector('input[type=range]');
+    rng.oninput = () => { num.value = rng.value; persist(); };
+    num.oninput = () => { rng.value = num.value; persist(); };
+  }
+  div.querySelectorAll('select,input[type=color]').forEach(el => el.onchange = persist);
+  return div;
+}
+function getValues() {
+  const o = {};
+  document.querySelectorAll('#form [data-name]').forEach(el => o[el.dataset.name] = el.value);
+  return o;
+}
+function setValues(v) {
+  for (const [k, val] of Object.entries(v)) {
+    const el = document.getElementById('s_' + k); if (!el) continue;
+    el.value = val;
+    const rng = document.querySelector(`input[type=range][data-for="s_${k}"]`); if (rng) rng.value = val;
+  }
+  persist();
+}
+function persist() { localStorage.setItem('flypaint.settings', JSON.stringify(getValues())); }
+$('#reset').onclick = () => { const d = {}; schema.forEach(f => d[f.name] = f.default); setValues(d); };
+
+// ---------- file ----------
+const drop = $('#drop');
+$('#file').onchange = e => pick(e.target.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+function pick(f) { if (!f) return; file = f; $('#fname').textContent = `${f.name} (${(f.size / 1e6).toFixed(1)} MB)`; $('#paint').disabled = !ready; }
+
+// ---------- submit ----------
+$('#paint').onclick = async () => {
+  if (!file) return;
+  const fd = new FormData(); fd.append('audio', file); fd.append('settings', JSON.stringify(getValues()));
+  $('#paint').disabled = true; $('#paint').textContent = 'Uploading…';
+  try {
+    const r = await fetch('/api/jobs', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const job = await r.json(); select(job.id); refreshGallery();
+  } catch (e) { alert('Could not start: ' + e.message); }
+  $('#paint').textContent = 'Paint'; $('#paint').disabled = false;
+};
+
+// ---------- status ----------
+let ready = false;
+async function pollStatus() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    const pill = $('#status');
+    if (s.loading) { pill.textContent = 'loading connectome…'; pill.className = 'pill'; }
+    else if (s.ready) { pill.textContent = `brain ready · ${s.neurons.toLocaleString()} neurons · ${s.edges.toLocaleString()} edges`; pill.className = 'pill ok'; ready = true; if (file) $('#paint').disabled = false; }
+    else { pill.textContent = 'connectome not loaded: ' + s.error; pill.className = 'pill bad'; }
+    if (s.loading) setTimeout(pollStatus, 1500);
+  } catch (e) { $('#status').textContent = 'server unreachable'; setTimeout(pollStatus, 3000); }
+}
+
+// ---------- jobs ----------
+async function refreshGallery() {
+  jobsCache = await fetch('/api/jobs').then(r => r.json());
+  const g = $('#gallery'); g.innerHTML = '';
+  if (!jobsCache.length) { g.innerHTML = '<div class="empty">No paintings yet.</div>'; return; }
+  for (const j of jobsCache) {
+    const t = document.createElement('div'); t.className = 'thumb' + (j.id === selected ? ' sel' : '');
+    const src = j.has_painting ? `/api/jobs/${j.id}/painting.png?t=${Math.floor(j.updated)}` : (j.has_preview ? `/api/jobs/${j.id}/preview.png?t=${Math.floor(j.updated)}` : '');
+    t.innerHTML = `${src ? `<img src="${src}" loading="lazy">` : '<div style="aspect-ratio:1;background:#f7f5ed"></div>'}<div class="cap">${esc(j.title)}<div>${j.state} · ${new Date(j.created * 1000).toLocaleString()}</div></div>`;
+    t.onclick = () => select(j.id);
+    g.appendChild(t);
+  }
+}
+function select(id) { selected = id; clearInterval(pollTimer); pollJob(); pollTimer = setInterval(pollJob, 1500); refreshGallery(); }
+async function pollJob() {
+  if (!selected) return;
+  const r = await fetch('/api/jobs/' + selected); if (!r.ok) { clearInterval(pollTimer); return; }
+  const j = await r.json(); render(j);
+  if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') { clearInterval(pollTimer); refreshGallery(); }
+}
+function render(j) {
+  $('#jobempty').hidden = true; $('#jobview').hidden = false;
+  $('#jtitle').textContent = j.title; $('#jstate').textContent = j.state + (j.position ? ` #${j.position}` : ''); $('#jstate').className = 'state ' + j.state;
+  $('#jwhen').textContent = new Date(j.created * 1000).toLocaleString();
+  $('#jbar').style.width = (100 * (j.progress || 0)).toFixed(1) + '%';
+  $('#cancel').hidden = !(j.state === 'running' || j.state === 'queued');
+  $('#delete').hidden = (j.state === 'running');
+  $('#cancel').onclick = () => fetch(`/api/jobs/${j.id}/cancel`, { method: 'POST' });
+  $('#delete').onclick = async () => { if (confirm('Delete this painting?')) { await fetch(`/api/jobs/${j.id}`, { method: 'DELETE' }); selected = null; $('#jobview').hidden = true; $('#jobempty').hidden = false; refreshGallery(); } };
+  $('#reuse').onclick = () => { setValues(j.settings); $('#compose').scrollIntoView({ behavior: 'smooth' }); };
+  const L = j.live || {}, m = j.meta || {};
+  let msg = j.message || '';
+  if (j.state === 'running' && L.stage === 'painting') msg = `frame ${L.frame} / ${L.n_frames} · audio ${L.t_audio_s.toFixed(1)} s · elapsed ${fmt(L.elapsed_s)} · ETA ${fmt(L.eta_s)}`;
+  if (j.state === 'done' && m.wall_s) msg = `${m.frames} frames · ${m.total_spikes.toLocaleString()} spikes · ${m.dabs.toLocaleString()} dabs · ${m.splats} splats · ${fmt(m.wall_s)}`;
+  if (j.state === 'failed') msg = 'failed: ' + (j.message || '');
+  $('#jmsg').textContent = msg; $('#jmsg').className = 'meta' + (j.state === 'failed' ? ' err' : '');
+  // live stats
+  const live = $('#jlive'); live.innerHTML = '';
+  if (L.rates) {
+    const c = L.cmd || {};
+    stat(live, 'spikes / frame', L.spikes); stat(live, 'descending Hz', L.rates.dn.toFixed(2));
+    stat(live, 'giant fibre Hz', L.rates.gf.toFixed(1)); stat(live, 'speed', c.speed.toFixed(2));
+    stat(live, 'turn', c.turn.toFixed(2)); stat(live, 'width', c.width.toFixed(2));
+    const sw = document.createElement('div'); sw.className = 'stat'; sw.innerHTML = `<div class="k">ink</div><div class="swatch" style="background:${hsv(c.hue, c.sat, c.value)}"></div>`; live.appendChild(sw);
+  }
+  const ch = $('#jchan'); ch.innerHTML = '';
+  if (L.channels) for (const [k, v] of Object.entries(L.channels)) {
+    ch.insertAdjacentHTML('beforeend', `<div class="chan"><span class="k">${k}</span><div class="b"><div style="width:${Math.min(100, 100 * v).toFixed(0)}%"></div></div><span class="k" style="width:36px;text-align:right">${v.toFixed(2)}</span></div>`);
+  }
+  // art
+  const art = $('#jart'); const t = Math.floor(j.updated);
+  if (j.state === 'done' && j.has_painting) {
+    art.innerHTML = `<figure><a href="/api/jobs/${j.id}/painting.png" target="_blank"><img src="/api/jobs/${j.id}/painting.png?t=${t}"></a><figcaption>painting</figcaption></figure>`
+      + (j.has_timelapse ? `<figure><img src="/api/jobs/${j.id}/timelapse.gif?t=${t}"><figcaption>timelapse</figcaption></figure>` : '');
+    $('#jlinks').innerHTML = `<a href="/api/jobs/${j.id}/painting.png" download="${esc(j.title)}-flypaint.png">download painting</a>`
+      + (j.has_timelapse ? `<a href="/api/jobs/${j.id}/timelapse.gif" download>timelapse</a>` : '')
+      + `<a href="/api/jobs/${j.id}/log.jsonl" download>per-frame log</a><a href="/api/jobs/${j.id}/meta.json" download>meta</a><a href="/api/jobs/${j.id}/audio/file" target="_blank">audio</a>`;
+  } else if (j.has_preview || j.has_painting) {
+    const name = j.has_painting ? 'painting.png' : 'preview.png';
+    art.innerHTML = `<figure><img src="/api/jobs/${j.id}/${name}?t=${Date.now()}"><figcaption>${j.state === 'running' ? 'live preview' : name}</figcaption></figure>`;
+    $('#jlinks').innerHTML = '';
+  } else { art.innerHTML = ''; $('#jlinks').innerHTML = ''; }
+}
+function stat(p, k, v) { p.insertAdjacentHTML('beforeend', `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`); }
+function fmt(s) { s = Math.max(0, s | 0); return s >= 3600 ? `${(s / 3600).toFixed(1)} h` : s >= 60 ? `${(s / 60) | 0} m ${s % 60} s` : `${s} s`; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function hsv(h, s, v) { h = ((h % 1) + 1) % 1; const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6]; return `rgb(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0})`; }
+
+loadSchema(); pollStatus(); refreshGallery();
+setInterval(() => { if (jobsCache.some(j => j.state === 'running' || j.state === 'queued')) refreshGallery(); }, 5000);
+</script>
+</body>
+</html>

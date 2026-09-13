@@ -94,6 +94,36 @@ def cache_path(min_synapses: int) -> Path:
     return D.cache_dir() / f"brain_traced_min{min_synapses}.npz"
 
 
+def _read_edges(path: Path, body_ids: np.ndarray, min_synapses: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Stream the 152 M-row edge file batch by batch, keeping only edges between retained
+    bodies with at least `min_synapses` contacts. Peak memory stays near the size of the
+    kept edges (a few hundred MB) instead of the ~9 GB a whole-file pandas load needs."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    # bodyId -> row index via sorted search (bodyIds are unique)
+    order = np.argsort(body_ids)
+    sorted_ids = body_ids[order]
+    pres, posts, cnts = [], [], []
+    with pa.memory_map(str(path), "r") as src:
+        reader = pa.ipc.open_file(src)
+        for i in range(reader.num_record_batches):
+            b = reader.get_batch(i)
+            if min_synapses > 1:
+                b = b.filter(pc.greater_equal(b.column("weight"), min_synapses))
+            bp = b.column("body_pre").to_numpy()
+            bq = b.column("body_post").to_numpy()
+            ip = np.searchsorted(sorted_ids, bp)
+            iq = np.searchsorted(sorted_ids, bq)
+            ip = np.minimum(ip, sorted_ids.size - 1)
+            iq = np.minimum(iq, sorted_ids.size - 1)
+            keep = (sorted_ids[ip] == bp) & (sorted_ids[iq] == bq)
+            pres.append(order[ip[keep]])
+            posts.append(order[iq[keep]])
+            cnts.append(b.column("weight").to_numpy()[keep].astype(np.float32))
+    return np.concatenate(pres).astype(np.int64), np.concatenate(posts).astype(np.int64), np.concatenate(cnts)
+
+
 def build(min_synapses: int = 1, verbose: bool = True) -> BrainGraph:
     """Build the retained graph from the raw feather files and cache it."""
     log = (lambda *a: print(*a, file=sys.stderr)) if verbose else (lambda *a: None)
@@ -109,18 +139,9 @@ def build(min_synapses: int = 1, verbose: bool = True) -> BrainGraph:
     ann["nt"] = nt.reindex(ann["bodyId"]).fillna("unclear").to_numpy()
     ann["sign"] = ann["nt"].map(NT_SIGN).fillna(1.0).astype(np.float32)
 
-    log("reading connection weights (about 1 GB, ~30 s) ...")
-    w = pf.read_table(D.path_for("connectome-weights-male-cns-v1.0-minconf-0.5.feather")).to_pandas()
-    if min_synapses > 1:
-        w = w[w["weight"] >= min_synapses]
-    row_of = pd.Series(np.arange(len(ann), dtype=np.int64), index=ann["bodyId"].to_numpy())
-    pre = row_of.reindex(w["body_pre"].to_numpy()).to_numpy()
-    post = row_of.reindex(w["body_post"].to_numpy()).to_numpy()
-    keep = ~(np.isnan(pre) | np.isnan(post))
-    pre = pre[keep].astype(np.int64)
-    post = post[keep].astype(np.int64)
-    cnt = w["weight"].to_numpy()[keep].astype(np.float32)
-    del w
+    log("reading connection weights (about 1 GB, streamed in batches) ...")
+    pre, post, cnt = _read_edges(D.path_for("connectome-weights-male-cns-v1.0-minconf-0.5.feather"),
+                                 ann["bodyId"].to_numpy(), min_synapses)
     log(f"retained {pre.size:,} directed edges ({cnt.sum():,.0f} synaptic contacts)")
 
     order = np.lexsort((post, pre))

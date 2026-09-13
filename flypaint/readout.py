@@ -82,15 +82,19 @@ class Readout:
     drive_hz: float = 1.2
     escape_hz: float = 20.0
     courtship_hz: float = 5.0
-    arousal_hz: float | None = None      # total downstream Hz for full width; default from signatures
+    arousal_scale: float = 0.5           # fraction of the calibration peak that gives full width
+    arousal_hz: float | None = None      # explicit override of the above
     splat_refractory_ms: float = 250.0
+    hue_high: float = 1.10
+    hue_mid: float = 0.92
+    hue_low: float = 0.65
     state: dict = field(default_factory=dict)
     _t_ms: float = 0.0
     _last_splat_ms: float = -1e9
 
     def __post_init__(self):
         if self.arousal_hz is None:
-            self.arousal_hz = 0.5 * max(self.sigs.total_hz.values())
+            self.arousal_hz = self.arousal_scale * max(self.sigs.total_hz.values())
         self._downstream = None
 
     def _ema(self, key: str, value: float, dt_ms: float, tau_ms: float | None = None) -> float:
@@ -126,7 +130,7 @@ class Readout:
         # hue path on the unwrapped colour wheel: high pitch = orange (1.10 -> 0.10),
         # through red and rose (0.92), to violet and deep blue (0.65) for low pitch.
         # Skips green/cyan so intermediate pitches read as warm-to-cool, not muddy.
-        hue = float(np.interp(pitch, [-1.0, 0.0, 1.0], [1.10, 0.92, 0.65]) % 1.0)
+        hue = float(np.interp(pitch, [-1.0, 0.0, 1.0], [self.hue_high, self.hue_mid, self.hue_low]) % 1.0)
         saturation = float(np.clip(0.35 + 0.65 * np.tanh(2.0 * sc["touch"] + 0.5 * sc["high"] + sm["courtship"] / self.courtship_hz), 0.1, 1.0))
         value = float(np.clip(0.9 - 0.55 * np.tanh(sm["escape"] / self.escape_hz), 0.2, 0.95))
         width = float(np.clip(np.tanh(sm["total"] / self.arousal_hz), 0.0, 1.0))

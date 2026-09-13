@@ -78,15 +78,16 @@ def _norm(x: np.ndarray, pct: float = 97.0) -> np.ndarray:
     return np.clip(x / ref, 0.0, 1.0).astype(np.float32)
 
 
-def extract_features(y: np.ndarray, sr: int, hop_ms: float = 10.0) -> AudioFeatures:
+def extract_features(y: np.ndarray, sr: int, hop_ms: float = 10.0, high_center_hz: float = 400.0,
+                     low_center_hz: float = 90.0, norm_pct: float = 97.0) -> AudioFeatures:
     if librosa is None:
         raise RuntimeError("librosa is required for feature extraction")
     hop = int(round(sr * hop_ms / 1000.0))
     n_fft = 2048
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-    w_high = _band_weights(freqs, center=400.0, width_oct=1.2)   # JO-A
-    w_low = _band_weights(freqs, center=90.0, width_oct=0.8)     # JO-B
-    w_low[freqs > 250] = 0.0
+    w_high = _band_weights(freqs, center=high_center_hz, width_oct=1.2)   # JO-A
+    w_low = _band_weights(freqs, center=low_center_hz, width_oct=0.8)     # JO-B
+    w_low[freqs > max(250.0, 2.5 * low_center_hz)] = 0.0
 
     a_high, a_low, wind, onset, loud = [], [], [], [], []
     env_tau_frames = 250.0 / hop_ms
@@ -105,11 +106,11 @@ def extract_features(y: np.ndarray, sr: int, hop_ms: float = 10.0) -> AudioFeatu
         flux = librosa.onset.onset_strength(S=librosa.power_to_db(S, ref=np.max), sr=sr, hop_length=hop)
         flux = np.resize(flux, ph.shape)
         # compress dynamic range (sqrt of power ~ amplitude) before normalising
-        a_high.append(_norm(np.sqrt(ph)))
-        a_low.append(_norm(np.sqrt(pl)))
-        wind.append(_norm(env))
-        onset.append(_norm(np.maximum(flux, 0.0)))
-        loud.append(_norm(rms))
+        a_high.append(_norm(np.sqrt(ph), norm_pct))
+        a_low.append(_norm(np.sqrt(pl), norm_pct))
+        wind.append(_norm(env, norm_pct))
+        onset.append(_norm(np.maximum(flux, 0.0), norm_pct))
+        loud.append(_norm(rms, norm_pct))
 
     return AudioFeatures(
         hop_ms=hop_ms, sr=sr, duration_s=y.shape[1] / sr,
@@ -118,6 +119,6 @@ def extract_features(y: np.ndarray, sr: int, hop_ms: float = 10.0) -> AudioFeatu
     )
 
 
-def features_from_file(path: str, hop_ms: float = 10.0) -> AudioFeatures:
+def features_from_file(path: str, hop_ms: float = 10.0, **kw) -> AudioFeatures:
     y, sr = load_audio(path)
-    return extract_features(y, sr, hop_ms)
+    return extract_features(y, sr, hop_ms, **kw)

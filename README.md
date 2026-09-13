@@ -61,19 +61,58 @@ connectome, which is why colour is not read from them.
 Nothing here claims the fly "likes" a song. It is a faithful wiring diagram driven by
 real sound and read out through neurons with documented roles or measured responses.
 
-## Install
+## Quickest start: Docker
+
+```bash
+git clone https://github.com/namdar12/flyPaint.git && cd flyPaint
+docker compose up
+```
+
+Open http://localhost:8000. The first start downloads the 1.1 GB connectome into
+`./data` and builds the graph cache (under a minute); later starts are instant.
+Paintings land in `./runs/web`. Both folders are plain host directories, so nothing is
+lost when the image is rebuilt. The container needs about 2 GB of memory (the one-time
+cache build peaks at 1.7 GB, painting uses 0.5 GB); Docker Desktop's default is enough.
+
+Other CLI commands run through the same image:
+
+```bash
+docker compose run --rm flypaint validate
+docker compose run --rm flypaint paint /app/runs/song.mp3 -o /app/runs/song
+```
+
+## Web app
+
+`flypaint serve` (or the Docker container) hosts a local single-page app:
+
+* drop in a wav, flac, ogg or mp3
+* every setting in the five groups (run, brain, ears, readout, painter) is a slider
+  with its help text; settings persist in the browser and can be copied back from
+  any earlier painting with "Use these settings"
+* jobs queue on one worker thread with the connectome loaded once; a live preview
+  refreshes every two seconds while the fly paints, with the current descending
+  rate, giant-fibre rate, brush command, ink colour and the four ear channels
+* finished paintings show with their timelapse and downloads for the PNG, GIF,
+  per-frame log and metadata, and stay in a gallery across restarts
+
+The API is plain JSON under `/api/` (`/api/settings` for the schema, `/api/jobs` to
+submit and list, `/api/jobs/<id>/painting.png` and friends for files).
+
+## Install without Docker
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e '.[test]'
-flypaint prepare          # downloads ~1.1 GB of MaleCNS files, builds the graph cache (~2 min)
+pip install -e '.[test,web]'
+flypaint prepare          # downloads ~1.1 GB of MaleCNS files, builds the graph cache (<1 min)
 flypaint validate         # sanity checks against a random-stimulation control
 flypaint bench            # how fast is this machine?
+flypaint serve            # web app on http://127.0.0.1:8000
+flypaint settings         # every tunable setting with defaults and help
 ```
 
 `prepare` fetches three public files from `gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/`
-(connection weights, body annotations, neurotransmitter predictions). Needs about
-4 GB of RAM to build the cache and 1 GB to run.
+(connection weights, body annotations, neurotransmitter predictions). The edge file is
+streamed in batches, so building the cache peaks at 1.7 GB of RAM and painting uses 0.5 GB.
 
 ## Paint
 
@@ -81,7 +120,10 @@ flypaint bench            # how fast is this machine?
 flypaint demo-song runs/demo.wav --seconds 30     # synthetic test track (pad, pulse song, drums)
 flypaint paint runs/demo.wav -o runs/demo
 flypaint paint ~/Music/track.mp3 --max-seconds 60
+flypaint paint song.wav --set hue_low=0.55 --set opacity=0.6 --set max_step_px=9
 ```
+
+Any of the 35 settings listed by `flypaint settings` can be passed with `--set`.
 
 Outputs in the run directory: `painting.png`, `timelapse.gif`, `frames/`, a per-frame
 `log.jsonl` with every readout rate and brush command, and `meta.json`.

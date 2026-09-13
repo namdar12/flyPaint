@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "python-multipart>=0.0.9"]
 
 [project.scripts]
 flypaint = "flypaint.cli:main"
@@ -28,6 +29,9 @@ flypaint = "flypaint.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["flypaint*"]
+
+[tool.setuptools.package-data]
+"flypaint.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

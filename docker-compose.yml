@@ -1,0 +1,19 @@
+services:
+  flypaint:
+    build: .
+    image: flypaint:latest
+    container_name: flypaint
+    ports:
+      - "${FLYPAINT_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data          # MaleCNS files + graph cache (1.3 GB, downloaded once)
+      - ./runs:/app/runs      # every painting, timelapse and log
+    environment:
+      - FLYPAINT_MIN_SYNAPSES=5
+      - OMP_NUM_THREADS=4
+    # First start peaks at ~1.7 GB RAM while building the graph cache; painting uses ~0.5 GB.
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    restart: unless-stopped
